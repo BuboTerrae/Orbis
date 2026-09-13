@@ -1,0 +1,27 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2024"
+autobins = false
+
+[[bin]]
+name = "polynia"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.30.2"
+color-eyre = "0.6.3"
+crossterm = "0.29.0"
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+unicode-width = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+dirs = "6.0"
+async-trait = "0.1"
+dotenvy = "0.15"
+git2 = "0.21.0"
