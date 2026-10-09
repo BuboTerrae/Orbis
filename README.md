@@ -4,6 +4,7 @@ A terminal coding agent that builds itself. Like Claude Code, Codex CLI, or open
 
 ![GitHub Health](https://shieldcn.dev/group/github/stars/buboterrae/Orbis+github/forks/buboterrae/Orbis+github/open-issues/buboterrae/Orbis.svg?variant=secondary&size=xs)
 ![GitHub Last Commit](https://shieldcn.dev/github/last-commit/buboterrae/Orbis.svg?variant=outline&size=xs)
+![GitHub CI](https://shieldcn.dev/github/ci/buboterrae/Orbis.svg?variant=outline&size=xs)
 ![GitHub Contributors](https://shieldcn.dev/github/contributors/buboterrae/Orbis.svg?variant=outline&theme=emerald&size=xs)
 ![GitHub Open PRs](https://shieldcn.dev/github/open-prs/buboterrae/Orbis.svg?variant=outline&size=xs)
 ![Repo Views](https://shieldcn.dev/views/repo/buboterrae/Orbis.svg?variant=branded&size=xs)
