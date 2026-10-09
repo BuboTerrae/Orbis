@@ -82,6 +82,7 @@ async fn test_session_persistence() -> Result<()> {
         ],
         todos: vec![],
         input_history: vec!["history1".to_string()],
+        token_usage: Default::default(),
     };
 
     let path = save(&session)?;
@@ -109,6 +110,7 @@ async fn test_compaction_preserves_tool_pairs() -> Result<()> {
                 id: "t1".into(),
                 name: "read_file".into(),
                 arguments: serde_json::json!({"path": "a.rs"}),
+                thought_signature: None,
             }],
         ),
         ChatMessage::tool_response("t1", "read_file", "fn main() {}"),

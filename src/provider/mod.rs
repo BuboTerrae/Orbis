@@ -149,11 +149,7 @@ impl TokenUsage {
 /// Rough token estimate when a provider omits usage metadata (~4 chars / token).
 pub fn estimate_tokens(text: &str) -> u64 {
     let chars = text.chars().count() as u64;
-    if chars == 0 {
-        0
-    } else {
-        (chars + 3) / 4
-    }
+    if chars == 0 { 0 } else { chars.div_ceil(4) }
 }
 
 pub fn estimate_message_tokens(messages: &[ChatMessage]) -> u64 {

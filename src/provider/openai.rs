@@ -1,7 +1,5 @@
 use super::sse::SseParser;
-use super::{
-    ChatMessage, LlmProvider, StreamChunk, TokenStream, TokenUsage, ToolCall, ToolSpec,
-};
+use super::{ChatMessage, LlmProvider, StreamChunk, TokenStream, TokenUsage, ToolCall, ToolSpec};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;

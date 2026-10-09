@@ -1,7 +1,5 @@
 use super::sse::SseParser;
-use super::{
-    ChatMessage, LlmProvider, StreamChunk, TokenStream, TokenUsage, ToolCall, ToolSpec,
-};
+use super::{ChatMessage, LlmProvider, StreamChunk, TokenStream, TokenUsage, ToolCall, ToolSpec};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -107,13 +105,7 @@ pub(crate) fn format_request(messages: &[ChatMessage]) -> (Option<Value>, Vec<Va
     }
 
     if contents.first().map(|(r, _)| r.as_str()) == Some("model") {
-        contents.insert(
-            0,
-            (
-                "user".to_string(),
-                vec![json!({"text": "Begin."})],
-            ),
-        );
+        contents.insert(0, ("user".to_string(), vec![json!({"text": "Begin."})]));
     }
 
     let contents = contents
@@ -309,7 +301,6 @@ impl LlmProvider for GeminiProvider {
             let mut pending_function_calls = Vec::new();
             let mut last_usage = TokenUsage::default();
             let mut call_index = 0usize;
-            let mut finished = false;
 
             let emit_finish = |tx: &tokio::sync::mpsc::UnboundedSender<StreamChunk>,
                                pending: &mut Vec<ToolCall>,
@@ -363,9 +354,7 @@ impl LlmProvider for GeminiProvider {
 
                             if let Some(candidates) = val["candidates"].as_array() {
                                 for candidate in candidates {
-                                    if let Some(parts) =
-                                        candidate["content"]["parts"].as_array()
-                                    {
+                                    if let Some(parts) = candidate["content"]["parts"].as_array() {
                                         for part in parts {
                                             if part.get("thought").and_then(Value::as_bool)
                                                 == Some(true)
@@ -375,12 +364,10 @@ impl LlmProvider for GeminiProvider {
                                             if let Some(text) = part["text"].as_str()
                                                 && !text.is_empty()
                                             {
-                                                let _ = tx.send(StreamChunk::Token(
-                                                    text.to_string(),
-                                                ));
+                                                let _ =
+                                                    tx.send(StreamChunk::Token(text.to_string()));
                                             }
-                                            if let Some(tc) =
-                                                parse_function_call(part, call_index)
+                                            if let Some(tc) = parse_function_call(part, call_index)
                                             {
                                                 call_index += 1;
                                                 pending_function_calls.push(tc);
@@ -388,8 +375,7 @@ impl LlmProvider for GeminiProvider {
                                         }
                                     }
 
-                                    if let Some(reason) =
-                                        candidate["finishReason"].as_str()
+                                    if let Some(reason) = candidate["finishReason"].as_str()
                                         && is_terminal_finish(reason)
                                     {
                                         if reason == "SAFETY" || reason == "RECITATION" {
@@ -398,12 +384,7 @@ impl LlmProvider for GeminiProvider {
                                             )));
                                             return;
                                         }
-                                        emit_finish(
-                                            &tx,
-                                            &mut pending_function_calls,
-                                            &last_usage,
-                                        );
-                                        finished = true;
+                                        emit_finish(&tx, &mut pending_function_calls, &last_usage);
                                         return;
                                     }
                                 }
@@ -415,9 +396,6 @@ impl LlmProvider for GeminiProvider {
                         return;
                     }
                 }
-            }
-            if !finished {
-                emit_finish(&tx, &mut pending_function_calls, &last_usage);
             }
         });
 
@@ -433,10 +411,7 @@ mod tests {
 
     #[test]
     fn system_prompt_is_not_a_user_turn() {
-        let msgs = vec![
-            ChatMessage::system("be helpful"),
-            ChatMessage::user("hi"),
-        ];
+        let msgs = vec![ChatMessage::system("be helpful"), ChatMessage::user("hi")];
         let (sys, contents) = format_request(&msgs);
         assert!(sys.is_some());
         assert_eq!(contents.len(), 1);

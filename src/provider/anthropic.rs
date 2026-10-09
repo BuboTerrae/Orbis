@@ -1,7 +1,5 @@
 use super::sse::SseParser;
-use super::{
-    ChatMessage, LlmProvider, StreamChunk, TokenStream, TokenUsage, ToolCall, ToolSpec,
-};
+use super::{ChatMessage, LlmProvider, StreamChunk, TokenStream, TokenUsage, ToolCall, ToolSpec};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -182,9 +180,7 @@ impl LlmProvider for AnthropicProvider {
                                tool: AnthropicToolAcc| {
                 let arguments = serde_json::from_str(&tool.json).unwrap_or(json!({}));
                 let _ = tx.send(StreamChunk::ToolCallDelta(ToolCall::new(
-                    tool.id,
-                    tool.name,
-                    arguments,
+                    tool.id, tool.name, arguments,
                 )));
             };
 

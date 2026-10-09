@@ -48,6 +48,14 @@ pub fn render_statusbar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
+        Span::styled(
+            format!(" BETA "),
+            Style::default()
+                .fg(theme.header_bg)
+                .bg(theme.warning)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
         Span::styled(format!("sess {sid}"), Style::default().fg(theme.border)),
         Span::raw("  "),
         Span::styled("[/]", theme.bold(theme.accent)),
