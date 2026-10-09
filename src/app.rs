@@ -1,7 +1,7 @@
 use crate::agent::harness::GenerationControl;
 use crate::agent::session::{self, Session};
 use crate::agent::tools::todo_ops::TodoItem;
-use crate::provider::{ChatMessage, ToolCall, config::Config};
+use crate::provider::{ChatMessage, TokenUsage, ToolCall, config::Config};
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +87,23 @@ pub struct App {
     pub input_history: Vec<String>,
     pub history_index: Option<usize>,
     pub should_quit: bool,
+    pub token_usage: TokenUsage,
+    pub session_token_usage: TokenUsage,
+    pub pending_turn_usage: Option<TokenUsage>,
+    pub slash_completion: Option<SlashCompletion>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SlashCompletion {
+    pub prefix: String,
+    pub candidates: Vec<String>,
+    pub selected: usize,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl App {
@@ -117,6 +134,10 @@ impl App {
             input_history: Vec::new(),
             history_index: None,
             should_quit: false,
+            token_usage: TokenUsage::default(),
+            session_token_usage: TokenUsage::default(),
+            pending_turn_usage: None,
+            slash_completion: None,
         }
     }
 
@@ -131,6 +152,7 @@ impl App {
             messages: self.messages.clone(),
             todos: self.todos.clone(),
             input_history: self.input_history.clone(),
+            token_usage: self.session_token_usage.clone(),
         }
     }
 
@@ -162,6 +184,9 @@ impl App {
         self.is_streaming = false;
         self.follow_chat = true;
         self.active_modal = ActiveModal::None;
+        self.session_token_usage = session.token_usage;
+        self.pending_turn_usage = None;
+        self.slash_completion = None;
         self.status_message = Some(format!("Resumed session {}", self.session_id));
     }
 
@@ -180,6 +205,9 @@ impl App {
         self.status_message = None;
         self.follow_chat = true;
         self.active_modal = ActiveModal::None;
+        self.session_token_usage = TokenUsage::default();
+        self.pending_turn_usage = None;
+        self.slash_completion = None;
     }
 
     pub fn cancel_generation(&mut self) {
@@ -188,6 +216,7 @@ impl App {
         self.pending_tool_calls.clear();
         self.tool_queue.clear();
         self.tools_in_flight = 0;
+        self.pending_turn_usage = None;
         if !self.streaming_buffer.is_empty() {
             let text = std::mem::take(&mut self.streaming_buffer);
             self.messages.push(ChatMessage::assistant(format!(

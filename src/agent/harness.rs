@@ -35,6 +35,12 @@ pub struct GenerationControl {
     pub cancelled: Arc<AtomicBool>,
 }
 
+impl Default for GenerationControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GenerationControl {
     pub fn new() -> Self {
         Self {

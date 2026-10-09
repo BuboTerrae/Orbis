@@ -4,15 +4,8 @@ use std::io::IsTerminal;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-mod agent;
-mod app;
-mod args;
-mod event;
-mod provider;
-mod ui;
-
-use app::App;
-use event::AppEvent;
+use orbis::event::AppEvent;
+use orbis::{agent, app::App, args, event, provider, self_update, setup_wizard, ui};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,6 +19,18 @@ async fn main() -> Result<()> {
             std::process::exit(2);
         }
     };
+
+    if cli.self_update {
+        return self_update::self_update().await;
+    }
+
+    if cli.setup {
+        return setup_wizard::run_setup_wizard().await;
+    }
+
+    if cli.doctor {
+        return setup_wizard::run_doctor().await;
+    }
 
     if cli.help {
         print!("{}", args::usage());
@@ -88,12 +93,11 @@ async fn run_app(
     while !app.should_quit {
         terminal.draw(|frame| ui::render(frame, app))?;
 
-        if ct_event::poll(Duration::from_millis(20))? {
-            if let CtEvent::Key(key) = ct_event::read()? {
-                if key.kind == ct_event::KeyEventKind::Press {
-                    event::handle_key_event(app, key, &tx)?;
-                }
-            }
+        if ct_event::poll(Duration::from_millis(20))?
+            && let CtEvent::Key(key) = ct_event::read()?
+            && key.kind == ct_event::KeyEventKind::Press
+        {
+            event::handle_key_event(app, key, &tx)?;
         }
 
         while let Ok(event) = rx.try_recv() {

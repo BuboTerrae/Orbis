@@ -161,8 +161,6 @@ fn styled_markdown_lines<'a>(text: &str, theme: &'a Theme) -> Vec<Line<'a>> {
             theme.border_focused
         } else if trimmed.starts_with('#') {
             theme.accent
-        } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-            theme.fg
         } else {
             theme.fg
         };

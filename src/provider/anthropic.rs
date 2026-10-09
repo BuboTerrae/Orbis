@@ -1,4 +1,7 @@
-use super::{ChatMessage, LlmProvider, StreamChunk, TokenStream, ToolCall, ToolSpec};
+use super::sse::SseParser;
+use super::{
+    ChatMessage, LlmProvider, StreamChunk, TokenStream, TokenUsage, ToolCall, ToolSpec,
+};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -92,6 +95,15 @@ fn format_messages(messages: &[ChatMessage]) -> (String, Vec<Value>) {
     (system_prompt, formatted)
 }
 
+fn parse_anthropic_usage(usage: &Value) -> TokenUsage {
+    TokenUsage {
+        input_tokens: usage["input_tokens"].as_u64().unwrap_or(0),
+        output_tokens: usage["output_tokens"].as_u64().unwrap_or(0),
+        cached_tokens: usage["cache_creation_input_tokens"].as_u64().unwrap_or(0)
+            + usage["cache_read_input_tokens"].as_u64().unwrap_or(0),
+    }
+}
+
 #[derive(Default)]
 struct AnthropicToolAcc {
     id: String,
@@ -162,38 +174,40 @@ impl LlmProvider for AnthropicProvider {
 
         tokio::spawn(async move {
             let mut stream = res.bytes_stream();
-            let mut buffer = String::new();
+            let mut sse = SseParser::new();
             let mut current_tool: Option<AnthropicToolAcc> = None;
+            let mut last_usage = TokenUsage::default();
 
             let finish_tool = |tx: &tokio::sync::mpsc::UnboundedSender<StreamChunk>,
                                tool: AnthropicToolAcc| {
                 let arguments = serde_json::from_str(&tool.json).unwrap_or(json!({}));
-                let _ = tx.send(StreamChunk::ToolCallDelta(ToolCall {
-                    id: tool.id,
-                    name: tool.name,
+                let _ = tx.send(StreamChunk::ToolCallDelta(ToolCall::new(
+                    tool.id,
+                    tool.name,
                     arguments,
-                }));
+                )));
             };
 
             while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
                     Ok(bytes) => {
-                        buffer.push_str(&String::from_utf8_lossy(&bytes));
-
-                        while let Some(line_end) = buffer.find('\n') {
-                            let line = buffer[..line_end].trim().to_string();
-                            buffer.drain(..=line_end);
-
-                            if !line.starts_with("data: ") {
-                                continue;
-                            }
-                            let data = line["data: ".len()..].trim();
-                            let Ok(val) = serde_json::from_str::<Value>(data) else {
+                        for data in sse.push(&bytes) {
+                            let Ok(val) = serde_json::from_str::<Value>(&data) else {
                                 continue;
                             };
                             let event_type = val["type"].as_str().unwrap_or("");
 
                             match event_type {
+                                "message_start" => {
+                                    if val["message"]["usage"].is_object() {
+                                        let u = parse_anthropic_usage(&val["message"]["usage"]);
+                                        last_usage.input_tokens = u.input_tokens;
+                                        last_usage.cached_tokens = u.cached_tokens;
+                                        if u.output_tokens > 0 {
+                                            last_usage.output_tokens = u.output_tokens;
+                                        }
+                                    }
+                                }
                                 "content_block_start" => {
                                     let block = &val["content_block"];
                                     if block["type"].as_str() == Some("tool_use") {
@@ -208,18 +222,18 @@ impl LlmProvider for AnthropicProvider {
                                     let delta = &val["delta"];
                                     match delta["type"].as_str().unwrap_or("") {
                                         "text_delta" => {
-                                            if let Some(text) = delta["text"].as_str() {
-                                                if !text.is_empty() {
-                                                    let _ = tx
-                                                        .send(StreamChunk::Token(text.to_string()));
-                                                }
+                                            if let Some(text) = delta["text"].as_str()
+                                                && !text.is_empty()
+                                            {
+                                                let _ =
+                                                    tx.send(StreamChunk::Token(text.to_string()));
                                             }
                                         }
                                         "input_json_delta" => {
-                                            if let Some(partial) = delta["partial_json"].as_str() {
-                                                if let Some(ref mut tool) = current_tool {
-                                                    tool.json.push_str(partial);
-                                                }
+                                            if let Some(partial) = delta["partial_json"].as_str()
+                                                && let Some(ref mut tool) = current_tool
+                                            {
+                                                tool.json.push_str(partial);
                                             }
                                         }
                                         _ => {}
@@ -228,6 +242,20 @@ impl LlmProvider for AnthropicProvider {
                                 "content_block_stop" => {
                                     if let Some(tool) = current_tool.take() {
                                         finish_tool(&tx, tool);
+                                    }
+                                }
+                                "message_delta" => {
+                                    if val["usage"].is_object() {
+                                        let u = parse_anthropic_usage(&val["usage"]);
+                                        if u.output_tokens > 0 {
+                                            last_usage.output_tokens = u.output_tokens;
+                                        }
+                                        if u.input_tokens > 0 {
+                                            last_usage.input_tokens = u.input_tokens;
+                                        }
+                                        if u.cached_tokens > 0 {
+                                            last_usage.cached_tokens = u.cached_tokens;
+                                        }
                                     }
                                 }
                                 "error" => {
@@ -240,6 +268,9 @@ impl LlmProvider for AnthropicProvider {
                                 "message_stop" => {
                                     if let Some(tool) = current_tool.take() {
                                         finish_tool(&tx, tool);
+                                    }
+                                    if !last_usage.is_zero() {
+                                        let _ = tx.send(StreamChunk::Usage(last_usage.clone()));
                                     }
                                     let _ = tx.send(StreamChunk::Done);
                                     return;
@@ -257,9 +288,52 @@ impl LlmProvider for AnthropicProvider {
             if let Some(tool) = current_tool.take() {
                 finish_tool(&tx, tool);
             }
+            if !last_usage.is_zero() {
+                let _ = tx.send(StreamChunk::Usage(last_usage));
+            }
             let _ = tx.send(StreamChunk::Done);
         });
 
         Ok(Box::pin(UnboundedReceiverStream::new(rx)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_messages, parse_anthropic_usage};
+    use crate::provider::{ChatMessage, ToolCall};
+    use serde_json::json;
+
+    #[test]
+    fn usage_from_message_start_includes_cache() {
+        let u = parse_anthropic_usage(&json!({
+            "input_tokens": 80,
+            "output_tokens": 0,
+            "cache_read_input_tokens": 20,
+            "cache_creation_input_tokens": 5
+        }));
+        assert_eq!(u.input_tokens, 80);
+        assert_eq!(u.cached_tokens, 25);
+        assert_eq!(u.total(), 80);
+    }
+
+    #[test]
+    fn tool_results_are_user_blocks() {
+        let msgs = vec![
+            ChatMessage::system("sys"),
+            ChatMessage::user("hi"),
+            ChatMessage::assistant_with_tools(
+                "",
+                vec![ToolCall::new("t1", "read_file", json!({"path": "a"}))],
+            ),
+            ChatMessage::tool_response("t1", "read_file", "ok"),
+        ];
+        let (system, formatted) = format_messages(&msgs);
+        assert_eq!(system, "sys");
+        assert_eq!(formatted.last().unwrap()["role"], "user");
+        assert_eq!(
+            formatted.last().unwrap()["content"][0]["type"],
+            "tool_result"
+        );
     }
 }

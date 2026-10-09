@@ -107,9 +107,18 @@ pub fn render_modals(frame: &mut Frame, app: &App, theme: &Theme) {
                 .split(area.inner(ratatui::layout::Margin::new(1, 1)));
 
             let tabs = List::new(vec![
-                ListItem::new(Line::from(" Keys")).style(if *selected_tab == 0 { theme.bold(theme.accent) } else { theme.text() }),
-                ListItem::new(Line::from(" Models")).style(if *selected_tab == 1 { theme.bold(theme.accent) } else { theme.text() }),
-            ]).block(Block::default().borders(Borders::RIGHT).title(" Tabs "));
+                ListItem::new(Line::from(" Keys")).style(if *selected_tab == 0 {
+                    theme.bold(theme.accent)
+                } else {
+                    theme.text()
+                }),
+                ListItem::new(Line::from(" Models")).style(if *selected_tab == 1 {
+                    theme.bold(theme.accent)
+                } else {
+                    theme.text()
+                }),
+            ])
+            .block(Block::default().borders(Borders::RIGHT).title(" Tabs "));
             frame.render_widget(tabs, chunks[0]);
 
             if *selected_tab == 0 {
@@ -124,24 +133,58 @@ pub fn render_modals(frame: &mut Frame, app: &App, theme: &Theme) {
                 let mut lines = vec![];
                 for (label, idx) in fields {
                     let is_selected = *selected_field == idx;
-                    let val = if is_selected { input_buffer.clone() } else { "********".to_string() };
+                    let val = if is_selected {
+                        input_buffer.clone()
+                    } else {
+                        "********".to_string()
+                    };
                     lines.push(Line::from(vec![
                         Span::styled(if is_selected { "▶ " } else { "  " }, theme.accent),
-                        Span::styled(label, if is_selected { theme.bold(theme.fg) } else { theme.text() }),
+                        Span::styled(
+                            label,
+                            if is_selected {
+                                theme.bold(theme.fg)
+                            } else {
+                                theme.text()
+                            },
+                        ),
                         Span::raw(": "),
                         Span::styled(val, theme.success),
                     ]));
                 }
-                frame.render_widget(Paragraph::new(lines).block(Block::default().title(" API Keys ")), chunks[1]);
+                frame.render_widget(
+                    Paragraph::new(lines).block(Block::default().title(" API Keys ")),
+                    chunks[1],
+                );
             } else {
                 let providers = ProviderType::all();
-                let items: Vec<ListItem> = providers.iter().enumerate().map(|(idx, p)| {
-                    let is_selected = *selected_field == idx;
-                    let active = if p == &app.config.active_provider { " (Active)" } else { "" };
-                    ListItem::new(Line::from(format!("{}{}{}", if is_selected { "▶ " } else { "  " }, p, active)))
-                        .style(if is_selected { theme.bold(theme.accent) } else { theme.text() })
-                }).collect();
-                frame.render_widget(List::new(items).block(Block::default().title(" Providers ")), chunks[1]);
+                let items: Vec<ListItem> = providers
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, p)| {
+                        let is_selected = *selected_field == idx;
+                        let active = if p == &app.config.active_provider {
+                            " (Active)"
+                        } else {
+                            ""
+                        };
+                        ListItem::new(Line::from(format!(
+                            "{}{}{}",
+                            if is_selected { "▶ " } else { "  " },
+                            p,
+                            active
+                        )))
+                        .style(if is_selected {
+                            theme.bold(theme.accent)
+                        } else {
+                            theme.text()
+                        })
+                    })
+                    .collect();
+                frame.render_widget(
+                    List::new(items).block(Block::default().title(" Providers ")),
+                    chunks[1],
+                );
             }
             frame.render_widget(block, area);
         }
@@ -242,7 +285,7 @@ pub fn render_modals(frame: &mut Frame, app: &App, theme: &Theme) {
             frame.render_widget(Clear, area);
 
             let block = Block::default()
-                .title(" Polynia Code - Help & Commands (Press Esc or Enter to close) ")
+                .title(" Orbis - Help & Commands (Press Esc or Enter to close) ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border_focused));
 

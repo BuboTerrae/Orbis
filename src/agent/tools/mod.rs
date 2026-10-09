@@ -7,6 +7,7 @@ pub mod bash_ops;
 pub mod code_symbols;
 pub mod file_ops;
 pub mod git_ops;
+pub mod mcp_ops;
 pub mod search_ops;
 pub mod subagent;
 pub mod todo_ops;
@@ -25,6 +26,7 @@ impl ToolRegistry {
         specs.extend(code_symbols::get_symbol_tools_specs());
         specs.extend(todo_ops::get_todo_tools_specs());
         specs.extend(subagent::get_subagent_tools_specs());
+        specs.extend(mcp_ops::get_mcp_tools_specs());
         specs
     }
 
@@ -42,6 +44,43 @@ impl ToolRegistry {
             "git_diff" => git_ops::git_diff(&arguments).await,
             "git_log" => git_ops::git_log(&arguments).await,
             "git_commit" => git_ops::git_commit(&arguments).await,
+            "git_worktree_list" => git_ops::git_worktree_list(&arguments).await,
+            "git_worktree_add" => git_ops::git_worktree_add(&arguments).await,
+            "git_worktree_remove" => git_ops::git_worktree_remove(&arguments).await,
+            "git_worktree_prune" => git_ops::git_worktree_prune(&arguments).await,
+            "mcp_list_servers" => mcp_ops::mcp_list_servers().await,
+            "mcp_connect_server" => {
+                let server_name = arguments["server_name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing 'server_name'"))?;
+                mcp_ops::mcp_connect_server(server_name).await.map(|tools| {
+                    format!(
+                        "Connected to server. Available tools:\n{}",
+                        tools
+                            .iter()
+                            .map(|t| format!("  - {}: {}", t.name, t.description))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                })
+            }
+            "mcp_call_tool" => {
+                let server_name = arguments["server_name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing 'server_name'"))?;
+                let tool_name = arguments["tool_name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing 'tool_name'"))?;
+                mcp_ops::mcp_call_tool(server_name, tool_name, arguments["arguments"].clone()).await
+            }
+            "mcp_disconnect_server" => {
+                let server_name = arguments["server_name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing 'server_name'"))?;
+                mcp_ops::mcp_disconnect_server(server_name)
+                    .await
+                    .map(|_| "Disconnected from server.".to_string())
+            }
             "search_code" => search_ops::search_code(&arguments),
             "fetch_url" => web_ops::fetch_url(&arguments).await,
             "find_symbols" => code_symbols::find_symbols(&arguments),

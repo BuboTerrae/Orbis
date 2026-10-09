@@ -3,11 +3,11 @@ use crate::agent::harness::{ensure_tool_call_id, is_read_tool, truncate_tool_out
 use crate::agent::system_prompt;
 use crate::agent::tools::ToolRegistry;
 use crate::provider::config::Config;
-use crate::provider::{ChatMessage, LlmProvider, StreamChunk, ToolCall, ToolSpec};
+use crate::provider::{ChatMessage, LlmProvider, StreamChunk, TokenUsage, ToolCall, ToolSpec};
 use anyhow::{Context, Result};
 use tokio_stream::StreamExt;
 
-fn assert_send<T: Send>(_: T) {}
+// fn assert_send<T: Send>(_: T) {}
 
 pub struct RunOptions {
     pub max_turns: usize,
@@ -31,22 +31,26 @@ pub async fn collect_completion(
     provider: &(dyn LlmProvider + Send + Sync),
     messages: &[ChatMessage],
     tools: &[ToolSpec],
-) -> Result<(String, Vec<ToolCall>)> {
+) -> Result<(String, Vec<ToolCall>, TokenUsage)> {
     let mut stream = provider.stream_chat(messages, tools).await?;
     let mut text = String::new();
     let mut tool_calls = Vec::new();
+    let mut usage = TokenUsage::default();
     while let Some(chunk) = stream.next().await {
         match chunk {
             StreamChunk::Token(tok) => text.push_str(&tok),
             StreamChunk::ToolCallDelta(mut tc) => {
                 ensure_tool_call_id(&mut tc, tool_calls.len());
-                tool_calls.push(tc);
+                if !tc.name.is_empty() {
+                    tool_calls.push(tc);
+                }
             }
+            StreamChunk::Usage(u) => usage = u,
             StreamChunk::Error(err) => anyhow::bail!(err),
             StreamChunk::Done => break,
         }
     }
-    Ok((text, tool_calls))
+    Ok((text, tool_calls, usage))
 }
 
 pub fn tools_for_depth(depth: u8) -> Vec<ToolSpec> {
@@ -95,12 +99,24 @@ pub async fn run_loop(
     let provider = crate::agent::build_provider(config)?;
     let tools = tools_for_depth(options.depth);
     let mut last_text = String::new();
+    let mut session_usage = TokenUsage::default();
 
     for turn in 0..options.max_turns {
         if compact::should_compact(&messages) {
             messages = compact::compact_messages(&messages, 4, 2_000);
         }
-        let (text, tool_calls) = collect_completion(provider.as_ref(), &messages, &tools).await?;
+        let (text, tool_calls, usage) =
+            collect_completion(provider.as_ref(), &messages, &tools).await?;
+        let usage = if usage.is_zero() {
+            TokenUsage {
+                input_tokens: crate::provider::estimate_message_tokens(&messages),
+                output_tokens: crate::provider::estimate_tokens(&text),
+                cached_tokens: 0,
+            }
+        } else {
+            usage
+        };
+        session_usage.add_assign(&usage);
         if options.print_tokens && !text.is_empty() {
             print!("{text}");
             let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -110,6 +126,15 @@ pub async fn run_loop(
         if tool_calls.is_empty() {
             if !text.is_empty() {
                 messages.push(ChatMessage::assistant(text));
+            }
+            if options.print_tokens && !session_usage.is_zero() {
+                eprintln!(
+                    "\n[tokens] in={} out={} cached={} total={}",
+                    session_usage.input_tokens,
+                    session_usage.output_tokens,
+                    session_usage.cached_tokens,
+                    session_usage.total()
+                );
             }
             return Ok(last_text);
         }
@@ -164,6 +189,16 @@ pub async fn run_loop(
         }
 
         let _ = turn;
+    }
+
+    if options.print_tokens && !session_usage.is_zero() {
+        eprintln!(
+            "\n[tokens] in={} out={} cached={} total={}",
+            session_usage.input_tokens,
+            session_usage.output_tokens,
+            session_usage.cached_tokens,
+            session_usage.total()
+        );
     }
 
     Ok(format!(

@@ -1,31 +1,19 @@
 use crate::agent::runner::parse_provider_flag;
 use crate::provider::config::{Config, ProviderType};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CliArgs {
     pub print: bool,
     pub auto: bool,
     pub readonly: bool,
     pub help: bool,
+    pub self_update: bool,
+    pub setup: bool,
+    pub doctor: bool,
     pub provider: Option<ProviderType>,
     pub model: Option<String>,
     pub endpoint: Option<String>,
     pub prompt: String,
-}
-
-impl Default for CliArgs {
-    fn default() -> Self {
-        Self {
-            print: false,
-            auto: false,
-            readonly: false,
-            help: false,
-            provider: None,
-            model: None,
-            endpoint: None,
-            prompt: String::new(),
-        }
-    }
 }
 
 pub fn parse_args(args: &[String]) -> Result<CliArgs, String> {
@@ -38,15 +26,18 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, String> {
             "-h" | "--help" => out.help = true,
             "-p" | "--print" => {
                 out.print = true;
-                if let Some(next) = args.get(i + 1) {
-                    if !next.starts_with('-') {
-                        positional.push(next.clone());
-                        i += 1;
-                    }
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    positional.push(next.clone());
+                    i += 1;
                 }
             }
             "--yolo" | "--auto" => out.auto = true,
             "--readonly" | "--read-only" => out.readonly = true,
+            "--self-update" => out.self_update = true,
+            "--setup" => out.setup = true,
+            "--doctor" => out.doctor = true,
             "--provider" => {
                 let val = args.get(i + 1).ok_or("--provider needs a name")?;
                 out.provider = Some(
@@ -106,18 +97,24 @@ pub fn apply_to_config(args: &CliArgs, config: &mut Config) {
 }
 
 pub fn usage() -> &'static str {
-    "Polynia Code — terminal coding agent
+    "Orbis — terminal coding agent
 
 Usage:
-  polynia                         Interactive TUI
-  polynia -p \"fix the tests\"      Headless print mode (agent loop on stdout)
-  polynia --print --yolo \"...\"    Headless, auto-approve all tools
-  polynia --readonly -p \"...\"     Headless, read-only tools
+  orbis                         Interactive TUI
+  orbis -p \"fix the tests\"      Headless print mode (agent loop on stdout)
+  orbis --print --yolo \"...\"    Headless, auto-approve all tools
+  orbis --readonly -p \"...\"     Headless, read-only tools
+  orbis --self-update             Update to latest version from GitHub Releases
+  orbis --setup                   Run first-time setup wizard
+  orbis --doctor                  Diagnose configuration issues
 
 Flags:
   -p, --print [prompt]   Run without TUI; stream the final answer
   --yolo, --auto         Auto-approve write/shell tools in print mode
   --readonly             Block write/shell/git-commit tools
+  --self-update          Update to latest version from GitHub Releases
+  --setup                Run first-time setup wizard
+  --doctor               Diagnose configuration and connectivity
   --provider NAME        gemini | openai | anthropic | openrouter | deepseek | custom
   --model NAME           Model id
   --endpoint URL         OpenAI-compatible base URL (implies custom if needed)

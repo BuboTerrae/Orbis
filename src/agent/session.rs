@@ -18,6 +18,8 @@ pub struct Session {
     pub todos: Vec<TodoItem>,
     #[serde(default)]
     pub input_history: Vec<String>,
+    #[serde(default)]
+    pub token_usage: crate::provider::TokenUsage,
 }
 
 #[derive(Debug, Clone)]
@@ -28,7 +30,7 @@ pub struct SessionMeta {
 }
 
 pub fn sessions_dir() -> Option<PathBuf> {
-    dirs::data_dir().map(|p| p.join("polynia").join("sessions"))
+    crate::paths::sessions_dir()
 }
 
 pub fn new_session_id() -> String {
@@ -108,7 +110,7 @@ pub fn list() -> Result<Vec<SessionMeta>> {
             updated_unix: session.updated_unix,
         });
     }
-    out.sort_by(|a, b| b.updated_unix.cmp(&a.updated_unix));
+    out.sort_by_key(|a| std::cmp::Reverse(a.updated_unix));
     out.truncate(30);
     Ok(out)
 }

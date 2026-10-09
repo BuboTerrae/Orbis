@@ -93,6 +93,89 @@ pub async fn git_commit(args: &serde_json::Value) -> Result<String> {
     Ok("Successfully created commit.".to_string())
 }
 
+pub async fn git_worktree_list(_args: &serde_json::Value) -> Result<String> {
+    let repo = get_repo()?;
+    let worktree_names = repo.worktrees()?;
+    let mut output = Vec::new();
+    for name_result in worktree_names.iter() {
+        let name = name_result?;
+        if let Some(name) = name {
+            let wt = repo.find_worktree(name)?;
+            let path = wt.path().display().to_string();
+            let branch = wt.name()?.unwrap_or("(detached)");
+            output.push(format!("{}  {}", path, branch));
+        }
+    }
+    if output.is_empty() {
+        Ok("No worktrees.".to_string())
+    } else {
+        Ok(output.join("\n"))
+    }
+}
+
+pub async fn git_worktree_add(args: &serde_json::Value) -> Result<String> {
+    let repo = get_repo()?;
+    let path_str = args["path"]
+        .as_str()
+        .context("Missing 'path' argument in git_worktree_add")?;
+    let branch = args["branch"].as_str();
+    let create_branch = args["create_branch"].as_bool().unwrap_or(true);
+
+    let path = std::path::Path::new(path_str);
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("worktree");
+
+    let mut opts = git2::WorktreeAddOptions::new();
+    opts.checkout_existing(!create_branch);
+
+    let worktree = if let Some(_branch) = branch {
+        repo.worktree(name, path, Some(&opts))?
+    } else {
+        repo.worktree(name, path, Some(&opts))?
+    };
+
+    Ok(format!("Created worktree at {}", worktree.path().display()))
+}
+
+pub async fn git_worktree_remove(args: &serde_json::Value) -> Result<String> {
+    let repo = get_repo()?;
+    let path_str = args["path"]
+        .as_str()
+        .context("Missing 'path' argument in git_worktree_remove")?;
+    let force = args["force"].as_bool().unwrap_or(false);
+
+    let path = std::path::Path::new(path_str);
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("worktree");
+
+    let wt = repo.find_worktree(name)?;
+    if force {
+        wt.lock(None)?;
+    }
+    wt.prune(Some(
+        &mut git2::WorktreePruneOptions::new().working_tree(force),
+    ))?;
+
+    Ok(format!("Removed worktree at {}", path.display()))
+}
+
+pub async fn git_worktree_prune(_args: &serde_json::Value) -> Result<String> {
+    let repo = get_repo()?;
+    let worktree_names = repo.worktrees()?;
+    for name_result in worktree_names.iter() {
+        if let Ok(Some(name)) = name_result
+            && let Ok(wt) = repo.find_worktree(name)
+        {
+            let _ = wt.prune(Some(&mut git2::WorktreePruneOptions::new()));
+        }
+    }
+    Ok("Pruned worktree administrative files.".to_string())
+}
+
 pub fn get_git_tools_specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
@@ -138,6 +221,47 @@ pub fn get_git_tools_specs() -> Vec<ToolSpec> {
                     }
                 },
                 "required": ["message"]
+            }),
+        },
+        ToolSpec {
+            name: "git_worktree_list".to_string(),
+            description: "List all git worktrees.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        ToolSpec {
+            name: "git_worktree_add".to_string(),
+            description: "Create a new git worktree at the given path. Optionally specify a branch to check out or create.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path where the worktree will be created" },
+                    "branch": { "type": "string", "description": "Branch to check out (creates new branch if create_branch=true)" },
+                    "create_branch": { "type": "boolean", "description": "Create the branch if it doesn't exist (default: true)" }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolSpec {
+            name: "git_worktree_remove".to_string(),
+            description: "Remove a git worktree. Use force=true to remove even if there are uncommitted changes.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path of the worktree to remove" },
+                    "force": { "type": "boolean", "description": "Force removal even with uncommitted changes (default: false)" }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolSpec {
+            name: "git_worktree_prune".to_string(),
+            description: "Prune worktree administrative files (clean up removed worktrees).".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {}
             }),
         },
     ]

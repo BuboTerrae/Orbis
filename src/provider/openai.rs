@@ -1,4 +1,7 @@
-use super::{ChatMessage, LlmProvider, StreamChunk, TokenStream, ToolCall, ToolSpec};
+use super::sse::SseParser;
+use super::{
+    ChatMessage, LlmProvider, StreamChunk, TokenStream, TokenUsage, ToolCall, ToolSpec,
+};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -43,10 +46,10 @@ impl ToolCallAccumulator {
             self.calls.push(PartialToolCall::default());
         }
         let slot = &mut self.calls[index];
-        if let Some(id) = delta["id"].as_str() {
-            if !id.is_empty() {
-                slot.id = id.to_string();
-            }
+        if let Some(id) = delta["id"].as_str()
+            && !id.is_empty()
+        {
+            slot.id = id.to_string();
         }
         if let Some(name) = delta["function"]["name"].as_str() {
             slot.name.push_str(name);
@@ -63,15 +66,15 @@ impl ToolCallAccumulator {
             .filter(|(_, p)| !p.name.is_empty())
             .map(|(i, p)| {
                 let arguments = serde_json::from_str(&p.arguments).unwrap_or_else(|_| json!({}));
-                ToolCall {
-                    id: if p.id.is_empty() {
+                ToolCall::new(
+                    if p.id.is_empty() {
                         format!("call_{i}")
                     } else {
                         p.id
                     },
-                    name: p.name,
+                    p.name,
                     arguments,
-                }
+                )
             })
             .collect()
     }
@@ -84,6 +87,36 @@ fn emit_finished_tools(
     for tc in acc.finish() {
         let _ = tx.send(StreamChunk::ToolCallDelta(tc));
     }
+}
+
+pub(crate) fn parse_openai_usage(val: &Value) -> Option<TokenUsage> {
+    let usage = val.get("usage")?;
+    if !usage.is_object() {
+        return None;
+    }
+    let input_tokens = usage
+        .get("prompt_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| usage.get("input_tokens").and_then(Value::as_u64))
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("completion_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| usage.get("output_tokens").and_then(Value::as_u64))
+        .unwrap_or(0);
+    let cached_tokens = usage
+        .pointer("/prompt_tokens_details/cached_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| usage.get("cached_tokens").and_then(Value::as_u64))
+        .unwrap_or(0);
+    if input_tokens == 0 && output_tokens == 0 && cached_tokens == 0 {
+        return None;
+    }
+    Some(TokenUsage {
+        input_tokens,
+        output_tokens,
+        cached_tokens,
+    })
 }
 
 #[async_trait]
@@ -158,6 +191,7 @@ impl LlmProvider for OpenAiProvider {
             "model": self.model,
             "messages": formatted_messages,
             "stream": true,
+            "stream_options": { "include_usage": true },
         });
 
         if !tools.is_empty() {
@@ -197,35 +231,40 @@ impl LlmProvider for OpenAiProvider {
 
         tokio::spawn(async move {
             let mut stream = res.bytes_stream();
-            let mut buffer = String::new();
+            let mut sse = SseParser::new();
             let mut acc = ToolCallAccumulator::default();
+            let mut last_usage = TokenUsage::default();
+
+            let finish = |tx: &tokio::sync::mpsc::UnboundedSender<StreamChunk>,
+                          acc: ToolCallAccumulator,
+                          usage: &TokenUsage| {
+                emit_finished_tools(tx, acc);
+                if !usage.is_zero() {
+                    let _ = tx.send(StreamChunk::Usage(usage.clone()));
+                }
+                let _ = tx.send(StreamChunk::Done);
+            };
 
             while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
                     Ok(bytes) => {
-                        buffer.push_str(&String::from_utf8_lossy(&bytes));
-
-                        while let Some(line_end) = buffer.find('\n') {
-                            let line = buffer[..line_end].trim().to_string();
-                            buffer.drain(..=line_end);
-
-                            if !line.starts_with("data: ") {
-                                continue;
-                            }
-                            let data = line["data: ".len()..].trim();
+                        for data in sse.push(&bytes) {
                             if data == "[DONE]" {
-                                emit_finished_tools(&tx, std::mem::take(&mut acc));
-                                let _ = tx.send(StreamChunk::Done);
+                                finish(&tx, std::mem::take(&mut acc), &last_usage);
                                 return;
                             }
 
-                            let Ok(val) = serde_json::from_str::<Value>(data) else {
+                            let Ok(val) = serde_json::from_str::<Value>(&data) else {
                                 continue;
                             };
 
                             if let Some(err) = val["error"]["message"].as_str() {
                                 let _ = tx.send(StreamChunk::Error(err.to_string()));
                                 return;
+                            }
+
+                            if let Some(usage) = parse_openai_usage(&val) {
+                                last_usage = usage;
                             }
 
                             let Some(choices) = val["choices"].as_array() else {
@@ -235,10 +274,10 @@ impl LlmProvider for OpenAiProvider {
                                 continue;
                             };
 
-                            if let Some(content) = first["delta"]["content"].as_str() {
-                                if !content.is_empty() {
-                                    let _ = tx.send(StreamChunk::Token(content.to_string()));
-                                }
+                            if let Some(content) = first["delta"]["content"].as_str()
+                                && !content.is_empty()
+                            {
+                                let _ = tx.send(StreamChunk::Token(content.to_string()));
                             }
 
                             if let Some(tool_calls) = first["delta"]["tool_calls"].as_array() {
@@ -254,8 +293,7 @@ impl LlmProvider for OpenAiProvider {
                     }
                 }
             }
-            emit_finished_tools(&tx, acc);
-            let _ = tx.send(StreamChunk::Done);
+            finish(&tx, acc, &last_usage);
         });
 
         Ok(Box::pin(UnboundedReceiverStream::new(rx)))
@@ -264,7 +302,7 @@ impl LlmProvider for OpenAiProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::ToolCallAccumulator;
+    use super::{ToolCallAccumulator, parse_openai_usage};
     use serde_json::json;
 
     #[test]
@@ -278,5 +316,22 @@ mod tests {
         assert_eq!(calls[0].id, "call_abc");
         assert_eq!(calls[0].name, "read_file");
         assert_eq!(calls[0].arguments["path"], "src/main.rs");
+    }
+
+    #[test]
+    fn usage_chunk_with_empty_choices_is_parsed() {
+        let usage = parse_openai_usage(&json!({
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 40,
+                "prompt_tokens_details": { "cached_tokens": 16 }
+            }
+        }))
+        .unwrap();
+        assert_eq!(usage.input_tokens, 120);
+        assert_eq!(usage.output_tokens, 40);
+        assert_eq!(usage.cached_tokens, 16);
+        assert_eq!(usage.total(), 160);
     }
 }

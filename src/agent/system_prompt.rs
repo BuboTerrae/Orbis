@@ -4,7 +4,7 @@ pub fn get_system_prompt() -> String {
         .to_string();
 
     format!(
-        r#"You are Polynia Code, a terminal coding agent (similar to Claude Code / Codex CLI).
+        r#"You are Orbis, a terminal coding agent (similar to Claude Code / Codex CLI).
 You operate in the workspace: `{cwd}`.
 
 Behavior:

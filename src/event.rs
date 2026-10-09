@@ -1,7 +1,7 @@
 use crate::agent::harness::{ensure_tool_call_id, is_blocked_in_readonly, should_auto_allow};
 use crate::app::{ActiveModal, App, FocusedPanel};
 use crate::provider::config::ProviderType;
-use crate::provider::{ChatMessage, StreamChunk, ToolCall};
+use crate::provider::{ChatMessage, StreamChunk, TokenUsage, ToolCall};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::VecDeque;
@@ -15,6 +15,10 @@ pub enum AppEvent {
     LlmToolCall {
         generation_id: u64,
         tool_call: ToolCall,
+    },
+    LlmUsage {
+        generation_id: u64,
+        usage: TokenUsage,
     },
     LlmDone {
         generation_id: u64,
@@ -336,25 +340,46 @@ fn handle_main_keys(app: &mut App, key: KeyEvent, tx: &UnboundedSender<AppEvent>
             } else if !app.input_buffer.is_empty() {
                 app.input_buffer.clear();
             }
+            app.slash_completion = None;
         }
         KeyCode::Tab => {
-            app.focused_panel = match app.focused_panel {
-                FocusedPanel::Input => FocusedPanel::Chat,
-                FocusedPanel::Chat => FocusedPanel::Input,
-            };
+            if app.focused_panel == FocusedPanel::Input && app.input_buffer.starts_with('/') {
+                handle_slash_tab_completion(app);
+            } else {
+                app.focused_panel = match app.focused_panel {
+                    FocusedPanel::Input => FocusedPanel::Chat,
+                    FocusedPanel::Chat => FocusedPanel::Input,
+                };
+            }
         }
-        KeyCode::Up if app.focused_panel == FocusedPanel::Chat => {
-            app.follow_chat = false;
-            app.chat_scroll = app.chat_scroll.saturating_sub(1);
+        KeyCode::Up => {
+            if app.focused_panel == FocusedPanel::Input && app.slash_completion.is_some() {
+                if let Some(comp) = &mut app.slash_completion
+                    && comp.selected > 0
+                {
+                    comp.selected -= 1;
+                    apply_slash_completion(app);
+                }
+            } else if app.focused_panel == FocusedPanel::Chat {
+                app.follow_chat = false;
+                app.chat_scroll = app.chat_scroll.saturating_sub(1);
+            } else if app.focused_panel == FocusedPanel::Input {
+                recall_history(app, -1);
+            }
         }
-        KeyCode::Down if app.focused_panel == FocusedPanel::Chat => {
-            app.chat_scroll += 1;
-        }
-        KeyCode::Up if app.focused_panel == FocusedPanel::Input => {
-            recall_history(app, -1);
-        }
-        KeyCode::Down if app.focused_panel == FocusedPanel::Input => {
-            recall_history(app, 1);
+        KeyCode::Down => {
+            if app.focused_panel == FocusedPanel::Input && app.slash_completion.is_some() {
+                if let Some(comp) = &mut app.slash_completion
+                    && comp.selected + 1 < comp.candidates.len()
+                {
+                    comp.selected += 1;
+                    apply_slash_completion(app);
+                }
+            } else if app.focused_panel == FocusedPanel::Chat {
+                app.chat_scroll += 1;
+            } else if app.focused_panel == FocusedPanel::Input {
+                recall_history(app, 1);
+            }
         }
         KeyCode::PageUp if app.focused_panel == FocusedPanel::Chat => {
             app.follow_chat = false;
@@ -468,8 +493,13 @@ fn handle_settings_keys(
             };
         }
         KeyCode::Up => {
-            if selected_tab == 0 { // Keys tab
-                let next_field = if selected_field == 0 { 5 } else { selected_field - 1 };
+            if selected_tab == 0 {
+                // Keys tab
+                let next_field = if selected_field == 0 {
+                    5
+                } else {
+                    selected_field - 1
+                };
                 app.active_modal = ActiveModal::Settings {
                     selected_tab,
                     selected_field: next_field,
@@ -517,7 +547,8 @@ fn handle_settings_keys(
                     }
                     app.config.save()?;
                 }
-            } else if selected_tab == 1 { // Models tab
+            } else if selected_tab == 1 {
+                // Models tab
                 let providers = crate::provider::config::ProviderType::all();
                 if let Some(p) = providers.get(selected_field) {
                     app.config.active_provider = p.clone();
@@ -656,6 +687,12 @@ pub fn trigger_llm_generation(app: &mut App, tx: UnboundedSender<AppEvent>) {
                                 tool_call: tc,
                             });
                         }
+                        StreamChunk::Usage(usage) => {
+                            let _ = tx.send(AppEvent::LlmUsage {
+                                generation_id,
+                                usage,
+                            });
+                        }
                         StreamChunk::Error(error) => {
                             let _ = tx.send(AppEvent::LlmError {
                                 generation_id,
@@ -706,6 +743,20 @@ pub fn apply_event(app: &mut App, event: AppEvent, tx: &UnboundedSender<AppEvent
             ensure_tool_call_id(&mut tool_call, app.pending_tool_calls.len());
             app.pending_tool_calls.push(tool_call);
         }
+        AppEvent::LlmUsage {
+            generation_id,
+            usage,
+        } => {
+            if !app.generation.is_current(generation_id) {
+                return;
+            }
+            app.token_usage.input_tokens += usage.input_tokens;
+            app.token_usage.output_tokens += usage.output_tokens;
+            app.token_usage.cached_tokens += usage.cached_tokens;
+            app.session_token_usage.input_tokens += usage.input_tokens;
+            app.session_token_usage.output_tokens += usage.output_tokens;
+            app.session_token_usage.cached_tokens += usage.cached_tokens;
+        }
         AppEvent::LlmDone { generation_id } => {
             if !app.generation.is_current(generation_id) {
                 return;
@@ -745,10 +796,10 @@ pub fn apply_event(app: &mut App, event: AppEvent, tx: &UnboundedSender<AppEvent
             if !app.generation.is_current(generation_id) {
                 return;
             }
-            if tool_name == "update_todos" {
-                if let Ok(todos) = crate::agent::tools::todo_ops::parse_todos(&arguments) {
-                    app.todos = todos;
-                }
+            if tool_name == "update_todos"
+                && let Ok(todos) = crate::agent::tools::todo_ops::parse_todos(&arguments)
+            {
+                app.todos = todos;
             }
             app.messages
                 .push(ChatMessage::tool_response(tool_call_id, tool_name, result));
@@ -859,4 +910,63 @@ fn handle_session_picker_keys(app: &mut App, selected_index: usize, key: KeyEven
         _ => {}
     }
     Ok(())
+}
+
+fn handle_slash_tab_completion(app: &mut App) {
+    let buffer = &app.input_buffer;
+    let prefix = buffer.trim_start_matches('/');
+
+    let all_commands = vec![
+        "/provider",
+        "/model",
+        "/settings",
+        "/config",
+        "/keys",
+        "/key",
+        "/mode",
+        "/permission",
+        "/security",
+        "/sec",
+        "/ping",
+        "/tree",
+        "/new",
+        "/sessions",
+        "/session",
+        "/resume",
+        "/compact",
+        "/endpoint",
+        "/clear",
+        "/status",
+        "/debug",
+    ];
+
+    let candidates: Vec<String> = all_commands
+        .into_iter()
+        .filter(|cmd| cmd.starts_with(&format!("/{prefix}")))
+        .map(|s| s.to_string())
+        .collect();
+
+    if candidates.is_empty() {
+        return;
+    }
+
+    let selected = 0;
+    let completion = candidates[0].clone();
+    let new_buffer = completion;
+
+    app.slash_completion = Some(crate::app::SlashCompletion {
+        prefix: prefix.to_string(),
+        candidates,
+        selected,
+    });
+    app.input_buffer = new_buffer;
+}
+
+fn apply_slash_completion(app: &mut App) {
+    if let Some(comp) = &app.slash_completion
+        && comp.selected < comp.candidates.len()
+    {
+        let completion = &comp.candidates[comp.selected];
+        app.input_buffer = completion.clone();
+    }
 }

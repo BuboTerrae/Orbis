@@ -1,1 +1,0 @@
-Build a coding assistant agent like Claude Code/Codex/OpenCode. Initialize the project with some basic UI/UX. It should be ale to connect to mupltiple LLM providers using keys. Only work on the TUI/CLI.

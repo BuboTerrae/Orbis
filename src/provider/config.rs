@@ -39,10 +39,10 @@ impl ProviderType {
 
     pub fn default_model(&self) -> &'static str {
         match self {
-            ProviderType::Gemini => "gemini-3.1-flash-lite",
+            ProviderType::Gemini => "gemini-1.5-flash",
             ProviderType::OpenAI => "gpt-4o",
             ProviderType::Anthropic => "claude-3-5-sonnet-20241022",
-            ProviderType::OpenRouter => "google/gemini-3.1-flash-lite",
+            ProviderType::OpenRouter => "google/gemini-1.5-flash",
             ProviderType::DeepSeek => "deepseek-chat",
             ProviderType::Custom => "llama3.2",
         }
@@ -73,7 +73,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             active_provider: ProviderType::Gemini,
-            active_model: "gemini-3.1-flash-lite".to_string(),
+            active_model: "gemini-1.5-flash".to_string(),
             gemini_api_key: None,
             openai_api_key: None,
             anthropic_api_key: None,
@@ -89,19 +89,17 @@ impl Default for Config {
 
 impl Config {
     pub fn config_file_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("polynia").join("config.toml"))
+        crate::paths::config_file()
     }
 
     pub fn load() -> Self {
         dotenvy::dotenv().ok();
-        if let Some(path) = Self::config_file_path() {
-            if path.exists() {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(cfg) = toml::from_str::<Config>(&content) {
-                        return cfg;
-                    }
-                }
-            }
+        if let Some(path) = Self::config_file_path()
+            && path.exists()
+            && let Ok(content) = fs::read_to_string(&path)
+            && let Ok(cfg) = toml::from_str::<Config>(&content)
+        {
+            return cfg;
         }
         Self::default()
     }
@@ -143,7 +141,8 @@ impl Config {
                 .ok()
                 .filter(|s| !s.trim().is_empty())
                 .or_else(|| self.deepseek_api_key.clone()),
-            ProviderType::Custom => env::var("POLYNIA_API_KEY")
+            ProviderType::Custom => env::var("ORBIS_API_KEY")
+                .or_else(|_| env::var("POLYNIA_API_KEY"))
                 .or_else(|_| env::var("CUSTOM_API_KEY"))
                 .or_else(|_| env::var("OPENAI_API_KEY"))
                 .ok()
@@ -163,7 +162,8 @@ impl Config {
             ProviderType::OpenRouter => env::var("OPENROUTER_API_KEY").is_ok(),
             ProviderType::DeepSeek => env::var("DEEPSEEK_API_KEY").is_ok(),
             ProviderType::Custom => {
-                env::var("POLYNIA_API_KEY").is_ok()
+                env::var("ORBIS_API_KEY").is_ok()
+                    || env::var("POLYNIA_API_KEY").is_ok()
                     || env::var("CUSTOM_API_KEY").is_ok()
                     || env::var("OPENAI_API_KEY").is_ok()
             }

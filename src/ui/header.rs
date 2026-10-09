@@ -77,7 +77,7 @@ pub fn render_header(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 
     let title_line = Line::from(vec![
         Span::styled(
-            " POLYNIA CODE ",
+            " ORBIS ",
             Style::default()
                 .fg(theme.header_bg)
                 .bg(theme.accent)

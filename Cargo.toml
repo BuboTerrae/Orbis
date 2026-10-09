@@ -1,11 +1,15 @@
 [package]
-name = "cli"
+name = "orbis"
 version = "0.1.0"
 edition = "2024"
 autobins = false
 
+[lib]
+name = "orbis"
+path = "src/lib.rs"
+
 [[bin]]
-name = "polynia"
+name = "orbis"
 path = "src/main.rs"
 
 [dependencies]
@@ -25,3 +29,13 @@ dirs = "6.0"
 async-trait = "0.1"
 dotenvy = "0.15"
 git2 = "0.21.0"
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.25"
+tree-sitter-go = "0.25"
+tokio-util = { version = "0.7", features = ["codec"] }
+semver = "1.0"
+
+[dev-dependencies]
+tempfile = "3.8"

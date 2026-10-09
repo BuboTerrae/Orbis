@@ -5,6 +5,7 @@ pub mod deepseek;
 pub mod gemini;
 pub mod openai;
 pub mod openrouter;
+pub mod sse;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -94,6 +95,24 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
+    /// Gemini 2.5/3 thought signatures must be echoed on subsequent turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
+}
+
+impl ToolCall {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: serde_json::Value,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            arguments,
+            thought_signature: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,12 +122,63 @@ pub struct ToolSpec {
     pub parameters: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+}
+
+impl TokenUsage {
+    /// Billed tokens for the turn. Cached tokens are a subset of input.
+    pub fn total(&self) -> u64 {
+        self.input_tokens + self.output_tokens
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.input_tokens == 0 && self.output_tokens == 0 && self.cached_tokens == 0
+    }
+
+    pub fn add_assign(&mut self, other: &TokenUsage) {
+        self.input_tokens += other.input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.cached_tokens += other.cached_tokens;
+    }
+}
+
+/// Rough token estimate when a provider omits usage metadata (~4 chars / token).
+pub fn estimate_tokens(text: &str) -> u64 {
+    let chars = text.chars().count() as u64;
+    if chars == 0 {
+        0
+    } else {
+        (chars + 3) / 4
+    }
+}
+
+pub fn estimate_message_tokens(messages: &[ChatMessage]) -> u64 {
+    messages
+        .iter()
+        .map(|m| {
+            let mut n = estimate_tokens(&m.content);
+            if let Some(calls) = &m.tool_calls {
+                for tc in calls {
+                    n += estimate_tokens(&tc.name);
+                    n += estimate_tokens(&tc.arguments.to_string());
+                }
+            }
+            n
+        })
+        .sum()
+}
+
 #[derive(Debug, Clone)]
 pub enum StreamChunk {
     Token(String),
     ToolCallDelta(ToolCall),
     Done,
     Error(String),
+    Usage(TokenUsage),
 }
 
 pub type TokenStream = Pin<Box<dyn Stream<Item = StreamChunk> + Send>>;
