@@ -133,23 +133,36 @@ jobs:
         run: |
           set -euo pipefail
 
+          # First, check what we downloaded
+          echo "Downloaded artifacts:"
+          find dist -type f -name "*" | sort
+
+          # Move artifacts to flat structure
           for dir in dist/orbis-*; do
             [ -d "$dir" ] || continue
 
+            # Extract target from directory name (orbis-x86_64-unknown-linux-gnu -> x86_64-unknown-linux-gnu)
             target="${dir#dist/orbis-}"
 
             if [[ "$target" == *windows* ]]; then
-              mv "$dir/orbis.exe" "dist/orbis-${target}.exe"
+              src="$dir/orbis.exe"
+              dst="dist/orbis-${target}.exe"
+              if [ -f "$src" ] && [ ! -f "$dst" ]; then
+                mv "$src" "$dst"
+              fi
             else
-              # Only move if destination doesn't already exist (avoids same-file error)
-              if [ -f "$dir/orbis" ] && [ ! -f "dist/orbis-${target}" ]; then
-                mv "$dir/orbis" "dist/orbis-${target}"
+              src="$dir/orbis"
+              dst="dist/orbis-${target}"
+              if [ -f "$src" ] && [ ! -f "$dst" ]; then
+                mv "$src" "$dst"
               fi
             fi
 
-            rm -rf "$dir" 2>/dev/null || true
+            # Clean up the now-empty directory
+            rmdir "$dir" 2>/dev/null || true
           done
 
+          echo "Prepared assets:"
           ls -lah dist
       - name: Generate checksums
         run: |
