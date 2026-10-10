@@ -133,33 +133,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          # First, check what we downloaded
           echo "Downloaded artifacts:"
           find dist -type f -name "*" | sort
 
-          # Move artifacts to flat structure
+          # The artifacts are downloaded into directories like:
+          # dist/orbis-x86_64-apple-darwin/orbis
+          # We need to rename the directory to the final asset name
           for dir in dist/orbis-*; do
             [ -d "$dir" ] || continue
 
-            # Extract target from directory name (orbis-x86_64-unknown-linux-gnu -> x86_64-unknown-linux-gnu)
             target="${dir#dist/orbis-}"
 
             if [[ "$target" == *windows* ]]; then
-              src="$dir/orbis.exe"
-              dst="dist/orbis-${target}.exe"
-              if [ -f "$src" ] && [ ! -f "$dst" ]; then
-                mv "$src" "$dst"
-              fi
+              # For Windows, the binary is orbis.exe inside the directory
+              # Rename the directory to the final asset name
+              mv "$dir" "dist/orbis-${target}.exe"
             else
-              src="$dir/orbis"
-              dst="dist/orbis-${target}"
-              if [ -f "$src" ] && [ ! -f "$dst" ]; then
-                mv "$src" "$dst"
-              fi
+              # For Unix, the binary is 'orbis' inside the directory
+              # Rename the directory to the final asset name
+              mv "$dir" "dist/orbis-${target}"
             fi
-
-            # Clean up the now-empty directory
-            rmdir "$dir" 2>/dev/null || true
           done
 
           echo "Prepared assets:"
