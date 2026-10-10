@@ -2,11 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
-    tags: ["v*"]
-
-  pull_request:
-    branches: [main, master]
+    tags:
+      - "v*"
 
 env:
   CARGO_TERM_COLOR: always
@@ -134,19 +131,27 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+      
       - name: Prepare release assets
+        shell: bash
         run: |
-          cd dist
-          for dir in orbis-*; do
-            target=$(echo $dir | sed 's/orbis-//')
-            if [[ "$target" == *"windows"* ]]; then
-              mv "$dir/orbis.exe" "orbis-$target.exe"
+          set -euo pipefail
+
+          for dir in dist/orbis-*; do
+            [ -d "$dir" ] || continue
+
+            target="${dir#dist/orbis-}"
+
+            if [[ "$target" == *windows* ]]; then
+              mv "$dir/orbis.exe" "dist/orbis-${target}.exe"
             else
-              mv "$dir/orbis" "orbis-$target"
+              mv "$dir/orbis" "dist/orbis-${target}"
             fi
-            rmdir "$dir"
+
+            rm -rf "$dir"
           done
-          ls -la
+
+          ls -lah dist
       - name: Generate checksums
         run: |
           cd dist
