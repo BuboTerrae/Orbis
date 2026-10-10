@@ -136,22 +136,23 @@ jobs:
           echo "Downloaded artifacts:"
           find dist -type f -name "*" | sort
 
-          # The artifacts are downloaded into directories like:
-          # dist/orbis-x86_64-apple-darwin/orbis
-          # We need to rename the directory to the final asset name
           for dir in dist/orbis-*; do
             [ -d "$dir" ] || continue
 
             target="${dir#dist/orbis-}"
 
             if [[ "$target" == *windows* ]]; then
-              # For Windows, the binary is orbis.exe inside the directory
-              # Rename the directory to the final asset name
-              mv "$dir" "dist/orbis-${target}.exe"
+              mv "$dir/orbis.exe" "dist/orbis-${target}.exe"
             else
-              # For Unix, the binary is 'orbis' inside the directory
-              # Rename the directory to the final asset name
-              mv "$dir" "dist/orbis-${target}"
+              # Use a temporary name so we never collide with the still-existing directory
+              mv "$dir/orbis" "dist/orbis-${target}.tmp"
+            fi
+
+            rmdir "$dir"
+
+            # Now that the directory is gone, give the binary its final name
+            if [[ "$target" != *windows* ]]; then
+              mv "dist/orbis-${target}.tmp" "dist/orbis-${target}"
             fi
           done
 
