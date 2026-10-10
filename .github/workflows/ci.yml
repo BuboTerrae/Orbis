@@ -77,10 +77,6 @@ jobs:
             target: x86_64-apple-darwin
             artifact: orbis
 
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: orbis
-
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: orbis.exe
@@ -145,10 +141,13 @@ jobs:
             if [[ "$target" == *windows* ]]; then
               mv "$dir/orbis.exe" "dist/orbis-${target}.exe"
             else
-              mv "$dir/orbis" "dist/orbis-${target}"
+              # Only move if destination doesn't already exist (avoids same-file error)
+              if [ -f "$dir/orbis" ] && [ ! -f "dist/orbis-${target}" ]; then
+                mv "$dir/orbis" "dist/orbis-${target}"
+              fi
             fi
 
-            rm -rf "$dir"
+            rm -rf "$dir" 2>/dev/null || true
           done
 
           ls -lah dist
