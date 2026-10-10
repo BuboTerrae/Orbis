@@ -20,6 +20,8 @@ A terminal coding agent that builds itself. Like Claude Code, Codex CLI, or open
 ![Hopes & Dreams](https://shieldcn.dev/badge/Runs%20on-hopes%20%26%20dreams-FF69B4.svg?variant=secondary&size=xs)
 ![Tests: Eventually](https://shieldcn.dev/badge/tests-eventually-orange.svg?variant=outline&size=xs)
 
+> `Orbis` is a Latin noun that means `"circle," "ring," "disc," "sphere,"` or `"world/globe"` (most famously used in the phrase orbis terrarum, meaning "circle of lands" or the world).
+
 ## Features
 
 - **Multi-provider LLM support**: Google Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, and custom OpenAI-compatible endpoints (Ollama, etc.)
