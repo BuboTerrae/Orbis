@@ -49,7 +49,7 @@ pub fn render_statusbar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme)
         ),
         Span::raw("  "),
         Span::styled(
-            format!(" BETA "),
+            " BETA ",
             Style::default()
                 .fg(theme.header_bg)
                 .bg(theme.warning)
