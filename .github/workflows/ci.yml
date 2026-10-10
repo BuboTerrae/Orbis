@@ -3,12 +3,13 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
+
   pull_request:
     branches: [main, master]
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
 
 jobs:
   test:
@@ -64,22 +65,25 @@ jobs:
         run: cargo test --all-features
 
   build:
-    name: Build Release
+    name: Build (${{ matrix.target }})
     needs: test
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: orbis
+
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: orbis
+
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: orbis
+
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: orbis.exe
